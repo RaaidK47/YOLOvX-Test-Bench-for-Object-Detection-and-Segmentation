@@ -27,9 +27,13 @@ def predict(chosen_model, img, classes=[], conf=0.5):
     return results
 
 # Function to draw bounding boxes and class names on the image
-def predict_and_detect(chosen_model, img, classes=[], conf=0.5, rectangle_thickness=1, text_thickness=1):
+def predict_and_detect(chosen_model, img, classes=[], conf=0.5, rectangle_thickness=1, text_thickness=1, font_scale=1):
     results = predict(chosen_model, img, classes, conf=conf)
     
+    print("Making Boxes With....")
+    print(f"Rectangle Thickness: {rectangle_thickness}")
+    print(f"Text Thickness: {text_thickness}")
+
     # Loop over detected results
     for result in results:
         # Loop over each detected box in the result
@@ -41,8 +45,8 @@ def predict_and_detect(chosen_model, img, classes=[], conf=0.5, rectangle_thickn
             cv2.rectangle(img, (x1, y1), (x2, y2), (255, 0, 0), rectangle_thickness)
             
             # Draw class label on the image
-            class_name = result.names[int(box.cls[0])]
-            cv2.putText(img, class_name, (x1, y1 - 10), cv2.FONT_HERSHEY_PLAIN, 1, (255, 0, 0), text_thickness)
+            class_name = result.names[int(box.cls[0])]  #(Class Name Only)
+            cv2.putText(img, class_name, (x1, y1 - 10), cv2.FONT_HERSHEY_PLAIN, font_scale, (255, 0, 0), text_thickness)
     
     return img, results
 
@@ -71,7 +75,7 @@ def convert_video(input_video_path, output_video_path):
         print(f"An error occurred: {e}")
         return None
 
-# Designing Sidebar
+# <---Designing Sidebar--->
 sideb = st.sidebar
 
 with sideb:
@@ -96,7 +100,6 @@ with sideb:
         version_num = match.group(1)
 
     version_num = int(version_num)
-
 
     if task == "Detection":
         if version_num == 8:
@@ -148,9 +151,6 @@ with sideb:
         index=0)   
 
 
-    st.session_state.download_status = False
-
-
     if os.path.exists(f'/tf/{yolo_model.lower()}.pt'):
         model = YOLO(f'{yolo_model.lower()}')
         st.session_state.model_status = f'<p style="color:green;">Model {yolo_model} loaded successfully.</p>'
@@ -165,11 +165,10 @@ with sideb:
 
     st.markdown('**Developed By:** M. Raaid Khan')
 
+# <---Sidebar Design Ends--->
 
 
-# Header    
-st.header("YOLOvX Test Bench")
-st.write("An Application to test YOLO Models for Aerial Object Detection and Image Segmentation in Pictures and Videos")
+# <---Designing Main Area--->
 
 
 col1, col2 = st.columns([3, 1])
@@ -179,14 +178,52 @@ def resize_image(image, height):
     new_width = int(height * aspect_ratio)
     return cv2.resize(image, (new_width, height))
 
+
 # Image/Video Area
+
+with col2:
+    st.subheader("Paramters")
+    st.session_state.show_original = st.toggle("Show Original Image", False)
+    st.session_state.conf = st.slider("Confidence", 0.0, 1.0, 0.3,)       
+    st.session_state.rectangle_thickness = st.slider("Rectangle Thickness", 1, 5, 1,)
+    st.session_state.text_thickness = st.slider("Text Thickness", 1, 5, 1,)
+    st.session_state.font_scale = st.slider("Text Size", 0.5, 1.5, 0.6,)
+
+
 with col1:
-     
+    # Header    
+    st.header("YOLOvX Test Bench")
+    st.write("An Application to test YOLO Models for Aerial Object Detection and Image Segmentation in Pictures and Videos")
+
+    # This function will only run once when the app starts
+    def app_startup():
+        global org_image
+        global result_img
+        org_image = None
+        result_img = None
+
+        st.session_state['initialized'] = True
+
+        # Setting Defualt Parameters
+        if 'conf' not in st.session_state:
+            st.session_state.conf = 0.3
+        if 'text_thickness ' not in st.session_state:
+            st.session_state.text_thickness = 1
+        if 'rectangle_thickness' not in st.session_state:
+            st.session_state.rectangle_thickness = 1
+        if 'show_original' not in st.session_state:
+            st.session_state.show_original = False
+        if 'font_scale' not in st.session_state:
+            st.session_state.font_scale = 1
+
+    # Check if the app has been initialized
+    if 'initialized' not in st.session_state:
+        app_startup()
+
     if model is not None:
         if input_type == "Image":
 
-            uploaded_image = st.file_uploader('', type='jpg', key=6)
-
+            uploaded_image = st.file_uploader('', type=['jpg','png'], key=6)
 
             if uploaded_image is not None:
                 file_bytes = uploaded_image.read()
@@ -195,18 +232,24 @@ with col1:
                 org_image = resized_image.copy()
 
                 
-                result_img, _ = predict_and_detect(model, resized_image, classes=[], conf=0.5)
+                result_img, _ = predict_and_detect(model, resized_image, classes=[], conf=st.session_state.conf,
+                                                   rectangle_thickness=st.session_state.rectangle_thickness, 
+                                                   text_thickness=st.session_state.text_thickness,
+                                                   font_scale=st.session_state.font_scale)
+                
+                if st.session_state.show_original == True:
+                    left_col, right_col= st.columns(2)
+                    with left_col:
+                        st.image(org_image, channels="BGR", caption="Original Image",)
 
-                left_col, right_col= st.columns(2)
+                    with right_col:
+                        st.image(result_img, channels="BGR", caption="Predicted Image",)
 
-                with left_col:
-                    st.image(org_image, channels="BGR", caption="Original Image",)
+                else:
+                    left_col, mid_col, right_col = st.columns([1,3,1])
+                    with mid_col:
+                        st.image(result_img, channels="BGR", caption="Predicted Image",)
 
-                with right_col:
-                    st.image(result_img, channels="BGR", caption="Predicted Image",)
-
-            output_path = "/tf/output_video.mp4"
-            st.video(output_path)
 
         if input_type == "Video":     
             # Upload a video file
@@ -228,20 +271,17 @@ with col1:
                 fps = int(video_stream.get(cv2.CAP_PROP_FPS)) 
 
                 # Create a VideoWriter object
-
+                # Video Created by OpenCV with Bounding Boxes
                 output_path = "/tf/output_video.mp4"
-
                 out_video = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
                 
-                rectangle_thickness = 1
-                text_thickness = 1
 
                 with st.spinner('Processing video...'): 
                     while True:
                         ret, frame = video_stream.read()
                         if not ret:
                             break
-                        result = model(frame)
+                        result = model(frame, conf=st.session_state.conf)
                         for detection in result[0].boxes.data:
                             x0, y0 = (int(detection[0]), int(detection[1]))
                             x1, y1 = (int(detection[2]), int(detection[3]))
@@ -250,13 +290,13 @@ with col1:
                             object_name =  model.names[cls]
                             label = f'{object_name} {score}' 
 
-                            cv2.rectangle(frame, (x0, y0), (x1, y1), (255, 0, 0), rectangle_thickness)
+                            cv2.rectangle(frame, (x0, y0), (x1, y1), (255, 0, 0), st.session_state.rectangle_thickness)
                             cv2.putText(frame, label, (x0, y0 - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), text_thickness)
+                            cv2.FONT_HERSHEY_SIMPLEX, st.session_state.font_scale, (255, 0, 0), st.session_state.text_thickness)
 
                         detections = result[0].verbose()
                         cv2.putText(frame, detections, (10, 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                        cv2.FONT_HERSHEY_SIMPLEX, st.session_state.conf, (0, 255, 0), 2)
                         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)  
                         out_video.write(frame) 
 
@@ -266,10 +306,13 @@ with col1:
                 st.write("Video Processed Successfully")
 
                 print("Converting Video...")
-                converted_video_path = convert_video(output_path, 'output_video_that_streamlit_can_play.mp4') #Delete Old Video or Change Name
+                file_name = os.path.splitext(uploaded_video.name)[0]
+                converted_video_path = convert_video(output_path, f'{file_name}_{time.time()}.mp4') #Delete Old Video or Change Name
 
                 st.video(converted_video_path)
-            
-
+    
     else:
         st.error("Please select a Valid model first.")
+
+
+    
