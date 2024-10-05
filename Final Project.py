@@ -1,5 +1,13 @@
 import streamlit as st
+
+# Make use of whole screen. (Left Aligned)
+def wide_space_default():
+    st.set_page_config(page_title="YOLOvX Test Bench",layout="wide")
+
+wide_space_default()
+
 from ultralytics import YOLO
+import torch
 import re
 import cv2
 import numpy as np
@@ -7,13 +15,7 @@ import os
 import threading
 import time
 import subprocess
-
-
-# Make use of whole screen. (Left Aligned)
-def wide_space_default():
-    st.set_page_config(layout="wide")
-
-wide_space_default()
+import pandas as pd
 
 
 # Function to predict with the chosen model
@@ -139,7 +141,7 @@ with sideb:
             index=0)
         
     st.header("Device")
-    device = st.selectbox(
+    device_selection = st.selectbox(
         'Select Preferred Device:',
         ('CPU', 'GPU'),
         index=1)   
@@ -149,12 +151,19 @@ with sideb:
         'Select Input Type:',
         ('Image', 'Video'),
         index=0)   
-
+    
 
     if os.path.exists(f'/tf/{yolo_model.lower()}.pt'):
         model = YOLO(f'{yolo_model.lower()}')
         st.session_state.model_status = f'<p style="color:green;">Model {yolo_model} loaded successfully.</p>'
-        st.session_state.download_text = ""
+
+        if device_selection == 'GPU':
+            if torch.cuda.is_available():
+                print("CUDA is available; Using GPU.")
+                model.to(torch.device('cuda'))
+        elif device_selection == 'CPU':
+           model.to(torch.device('cpu'))
+           print("Using CPU.")
     else:
         model = None
         st.session_state.model_status = f'<p style="color:red;">Model {yolo_model} not found.</p>'
@@ -170,7 +179,6 @@ with sideb:
 
 # <---Designing Main Area--->
 
-
 col1, col2 = st.columns([3, 1])
 
 def resize_image(image, height):
@@ -183,17 +191,17 @@ def resize_image(image, height):
 
 with col2:
     st.subheader("Paramters")
-    st.session_state.show_original = st.toggle("Show Original Image", False)
+    
     st.session_state.conf = st.slider("Confidence", 0.0, 1.0, 0.3,)       
     st.session_state.rectangle_thickness = st.slider("Rectangle Thickness", 1, 5, 1,)
     st.session_state.text_thickness = st.slider("Text Thickness", 1, 5, 1,)
-    st.session_state.font_scale = st.slider("Text Size", 0.5, 1.5, 0.6,)
-
+    st.session_state.font_scale = st.slider("Text Size", 0.5, 1.5, 1.0,)
+    st.session_state.show_original = st.toggle("Show Original Image", False)
 
 with col1:
     # Header    
     st.header("YOLOvX Test Bench")
-    st.write("An Application to test YOLO Models for Aerial Object Detection and Image Segmentation in Pictures and Videos")
+    st.write("An Application to test YOLO Models for Object Detection and Image Segmentation in Pictures and Videos")
 
     # This function will only run once when the app starts
     def app_startup():
@@ -201,6 +209,7 @@ with col1:
         global result_img
         org_image = None
         result_img = None
+
 
         st.session_state['initialized'] = True
 
@@ -215,6 +224,10 @@ with col1:
             st.session_state.show_original = False
         if 'font_scale' not in st.session_state:
             st.session_state.font_scale = 1
+
+        # Check to Display Summary if Image Detection Model is Executed 
+        if 'image_model_executed' not in st.session_state:
+            st.session_state.image_model_executed = False
 
     # Check if the app has been initialized
     if 'initialized' not in st.session_state:
@@ -231,12 +244,16 @@ with col1:
                 resized_image = resize_image(org_image, 400)
                 org_image = resized_image.copy()
 
-                
-                result_img, _ = predict_and_detect(model, resized_image, classes=[], conf=st.session_state.conf,
+                start_time = time.time()
+
+                result_img, model_results = predict_and_detect(model, resized_image, classes=[], conf=st.session_state.conf,
                                                    rectangle_thickness=st.session_state.rectangle_thickness, 
                                                    text_thickness=st.session_state.text_thickness,
                                                    font_scale=st.session_state.font_scale)
                 
+                end_time = time.time()
+                inference_time = end_time - start_time
+
                 if st.session_state.show_original == True:
                     left_col, right_col= st.columns(2)
                     with left_col:
@@ -250,8 +267,11 @@ with col1:
                     with mid_col:
                         st.image(result_img, channels="BGR", caption="Predicted Image",)
 
+                st.session_state.image_model_executed = True
 
-        if input_type == "Video":     
+
+        if input_type == "Video":   
+            model_results = None  
             # Upload a video file
             uploaded_video = st.file_uploader("Choose a video...", type=["mp4", "avi", "mov", "mkv"])
 
@@ -290,13 +310,17 @@ with col1:
                             object_name =  model.names[cls]
                             label = f'{object_name} {score}' 
 
+                            # Putting Text and Rectangle on Each Object
                             cv2.rectangle(frame, (x0, y0), (x1, y1), (255, 0, 0), st.session_state.rectangle_thickness)
                             cv2.putText(frame, label, (x0, y0 - 10),
                             cv2.FONT_HERSHEY_SIMPLEX, st.session_state.font_scale, (255, 0, 0), st.session_state.text_thickness)
 
                         detections = result[0].verbose()
-                        cv2.putText(frame, detections, (10, 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, st.session_state.conf, (0, 255, 0), 2)
+
+                        #Putting Text on Top Left with Frame Summary
+                        cv2.putText(frame, detections, (20, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX, (st.session_state.font_scale+0.5), (0, 255, 0), (st.session_state.text_thickness+1))
+
                         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)  
                         out_video.write(frame) 
 
@@ -314,5 +338,56 @@ with col1:
     else:
         st.error("Please select a Valid model first.")
 
+def detections_to_dataframe(results, class_names, thres):
+        thres = thres / 100
+    	# Initialize lists to store detection data
+        all_boxes = []
+        all_confidences = []
+        all_class_ids = []
+        all_class_names = []
 
-    
+    	# Iterate over each detection in the results
+        for box in results[0].boxes:
+            xmin, ymin, xmax, ymax = box.xyxy[0].cpu().numpy()
+            cls_id = int(box.cls[0].item())  # Extract class ID
+            class_name = results[0].names[int(box.cls[0])]
+            conf = round(box.conf[0].item(), 2)  # Extract confidence score
+
+            if conf >= thres:  # Apply threshold
+                    all_boxes.append([xmin, ymin, xmax, ymax])
+                    all_confidences.append(conf)
+                    all_class_ids.append(cls_id)
+                    all_class_names.append(class_name)  # Convert class ID to class name
+
+        # Create a DataFrame
+        df = pd.DataFrame(all_boxes, columns=['xmin', 'ymin', 'xmax', 'ymax'])
+        df['confidence'] = all_confidences
+        df['class'] = all_class_ids
+        df['name'] = all_class_names
+
+        return df
+
+with col2:
+    if st.session_state.image_model_executed:
+        df = detections_to_dataframe(model_results, class_names=[], thres= st.session_state.conf)
+
+
+        summary = {
+            "Total Objects Detected": len(df),
+            "Classes Detected": df['name'].unique().tolist(),
+            "Confidence Scores": df['confidence'].tolist(),
+            "Bounding Boxes": df[['xmin', 'ymin', 'xmax', 'ymax']].values.tolist(),
+        }
+
+         # Display the summary
+        st.write("### Summary of Detection")
+        st.write(f"**Total Objects Detected:** {summary['Total Objects Detected']}")
+        st.write(f"**Classes Detected:** {', '.join(summary['Classes Detected'])}")
+        st.write(f"**Confidence Scores:** {summary['Confidence Scores']}")
+        # st.write("**Bounding Boxes:**")
+        # st.write(summary['Bounding Boxes'])
+
+        # Time taken for inference
+        st.write(f"**Inference Time:** {inference_time:.2f} Seconds")
+
+        st.session_state.image_model_executed = False
